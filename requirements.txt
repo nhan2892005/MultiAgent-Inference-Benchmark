@@ -1,0 +1,24 @@
+# =============================================================================
+# Multi-Agent Inference Benchmark & Ray Skeleton
+# =============================================================================
+
+# OpenAI-compatible client — used by UnifiedAgentClient (unified_client.py)
+# Must be >= 1.30 for stream_options={"include_usage": True} support
+openai>=1.30
+
+# Distributed compute framework — used by ray_skeleton.py and heterogeneous_agents.py
+# Ray 2.x required for native async ObjectRef await support
+ray>=2.10.0
+
+# =============================================================================
+# Optional — install only if running specific engines locally (not via Docker)
+# =============================================================================
+
+# Ollama Python SDK (alternative to REST calls — not required, engines use OpenAI API)
+# ollama>=0.2.0
+
+# vLLM (if running vLLM directly without Docker)
+# vllm>=0.4.0
+
+# SGLang (if running SGLang directly without Docker)
+# sglang>=0.2.0
