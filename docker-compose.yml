@@ -1,0 +1,141 @@
+# =============================================================================
+# Multi-Agent Inference Engine Cluster
+# Deploys 4 OpenAI-compatible engines on different ports:
+#   - Ollama       → :11434
+#   - llama.cpp    → :8080
+#   - vLLM         → :8000
+#   - SGLang       → :30000
+# =============================================================================
+
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Ollama — easiest to get started, good for CPU/GPU, pulls models on demand
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: bench_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    # Uncomment for GPU support (requires nvidia-container-toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # llama.cpp server — ultra-lean, excellent GGUF quantisation support
+  # Model must be mounted via volume; update MODEL_PATH as needed
+  # ---------------------------------------------------------------------------
+  llama_cpp:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    container_name: bench_llama_cpp
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models:/models:ro          # Drop your .gguf files here
+    command: >
+      --model /models/llama-3.2-3b-instruct-q4_k_m.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 8192
+      --n-predict 512
+      --threads 8
+      --parallel 4                   # 4 concurrent request slots
+      --cont-batching                # Continuous batching (vLLM-like)
+      --flash-attn
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # vLLM — production-grade, PagedAttention, best GPU throughput
+  # Requires NVIDIA GPU; uses HuggingFace model hub
+  # ---------------------------------------------------------------------------
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: bench_vllm
+    ports:
+      - "8000:8000"
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}        # Set in .env if using gated models
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+    command: >
+      --model meta-llama/Llama-3.2-3B-Instruct
+      --host 0.0.0.0
+      --port 8000
+      --max-model-len 8192
+      --gpu-memory-utilization 0.85
+      --enable-prefix-caching          # Key for shared-context benchmark
+      --served-model-name llama-3.2-3b
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # SGLang — RadixAttention prefix cache, great for multi-agent workloads
+  # ---------------------------------------------------------------------------
+  sglang:
+    image: lmsysorg/sglang:latest
+    container_name: bench_sglang
+    ports:
+      - "30000:30000"
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+    command: >
+      python -m sglang.launch_server
+      --model-path meta-llama/Llama-3.2-3B-Instruct
+      --host 0.0.0.0
+      --port 30000
+      --context-length 8192
+      --enable-torch-compile          # Faster on GPU
+      --disable-radix-cache           # Set to false to ENABLE RadixAttention
+      --served-model-name llama-3.2-3b
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:30000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  hf_cache:
